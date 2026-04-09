@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: 'Nunito', sans-serif;
+    background: #faf3e4;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+}
+
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+  }
+
+  .glass-dark {
+    background: rgba(255, 248, 235, 0.7);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+  }
+
+  .glass-input {
+    background: rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1.5px solid rgba(212, 168, 83, 0.25);
+    transition: all 0.2s ease;
+  }
+
+  .glass-input:focus {
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(212, 168, 83, 0.55);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(212, 168, 83, 0.12);
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #d4a853 0%, #c49040 100%);
+    color: white;
+    font-weight: 600;
+    border-radius: 14px;
+    padding: 10px 22px;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 14px rgba(212, 168, 83, 0.3);
+    border: none;
+    cursor: pointer;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(212, 168, 83, 0.4);
+    filter: brightness(1.05);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-ghost {
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid rgba(255, 255, 255, 0.7);
+    border-radius: 12px;
+    padding: 8px 18px;
+    font-weight: 600;
+    color: #7a6245;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.65);
+    transform: translateY(-1px);
+  }
+
+  .card-hover {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .card-hover:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 16px 40px rgba(180, 140, 80, 0.18);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Background mesh gradient */
+.bg-mesh {
+  background-color: #faf3e4;
+  background-image:
+    radial-gradient(at 20% 10%, rgba(255, 235, 180, 0.6) 0px, transparent 50%),
+    radial-gradient(at 80% 20%, rgba(255, 248, 225, 0.7) 0px, transparent 50%),
+    radial-gradient(at 10% 80%, rgba(250, 230, 180, 0.4) 0px, transparent 50%),
+    radial-gradient(at 90% 85%, rgba(255, 240, 200, 0.5) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(255, 252, 240, 0.3) 0px, transparent 50%);
+  min-height: 100vh;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  background: rgba(140, 110, 60, 0.25);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Camera viewfinder */
+.camera-viewfinder {
+  border: 2px solid rgba(212, 168, 83, 0.5);
+  box-shadow: 0 0 0 4px rgba(212, 168, 83, 0.15), inset 0 0 30px rgba(0,0,0,0.1);
+}
+
+/* Scrollable modal */
+.modal-scroll {
+  max-height: 90vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Badge gradient */
+.badge-card {
+  background: linear-gradient(135deg, #d4a853, #e8c070);
+  color: white;
+}
+
+/* Subtle noise texture overlay */
+.noise-overlay::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 128px;
+  z-index: 9999;
+}
