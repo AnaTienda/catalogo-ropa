@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 //    Project URL → Settings → API → Project URL
 //    Anon Key   → Settings → API → Project API Keys → anon / public
 const supabaseUrl = 'https://njjcljvmeraobrsuqxlf.supabase.co'
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qamNsanZtZXJhb2Jyc3VxeGxmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxNjcxNTIsImV4cCI6MjA1OTc0MzE1Mn0.placeholder_replace_with_real_key'
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qamNsanZtZXJhb2Jyc3VxeGxmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDI5ODEsImV4cCI6MjA5MTI3ODk4MX0.q04v_mN2LydrgIL0A7EcZswxpTyYnet5-o1yspOsRis'
 
 // IMPORTANTE: La clave de arriba es un placeholder. 
 // Copiá la "anon public" key desde tu dashboard de Supabase.
