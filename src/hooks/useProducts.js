@@ -9,7 +9,7 @@ export function useProducts() {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // ─── CARGAR PRODUCTOS ─────────────────────────────
+  // ─── CARGAR PRODUCTOS INICIALES ─────────────────────────────
   const fetchProducts = useCallback(async () => {
     setLoading(true)
 
@@ -27,13 +27,49 @@ export function useProducts() {
     setLoading(false)
   }, [])
 
+  // ─── SUSCRIPCIÓN REALTIME Y MONTAJE ─────────────────────────
   useEffect(() => {
     fetchProducts()
+
+    // Creamos el canal para escuchar cambios en la tabla 'products'
+    const channel = supabase
+      .channel('public:products')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        (payload) => {
+          setProducts((currentProducts) => {
+            switch (payload.eventType) {
+              case 'INSERT':
+                // Evitamos duplicados en caso de carrera de estados
+                if (currentProducts.some(p => p.id === payload.new.id)) return currentProducts
+                // Insertamos al principio para mantener el orden DESC de created_at
+                return [payload.new, ...currentProducts]
+                
+              case 'UPDATE':
+                return currentProducts.map(p =>
+                  p.id === payload.new.id ? payload.new : p
+                )
+                
+              case 'DELETE':
+                return currentProducts.filter(p => p.id !== payload.old.id)
+                
+              default:
+                return currentProducts
+            }
+          })
+        }
+      )
+      .subscribe()
+
+    // Cleanup de la suscripción al desmontar
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [fetchProducts])
 
   // ─── AGREGAR PRODUCTO ─────────────────────────────
   const addProduct = useCallback(async ({ name, price, imageDataUrl }) => {
-    // Obtener último producto para generar código incremental
     const { data: last } = await supabase
       .from('products')
       .select('code')
@@ -63,11 +99,10 @@ export function useProducts() {
 
     if (error) {
       console.error('Error agregando producto:', error)
-      return
     }
-
-    fetchProducts()
-  }, [fetchProducts])
+    // NOTA: Ya no llamamos a fetchProducts() aquí. 
+    // La suscripción Realtime detectará el INSERT y actualizará el estado automáticamente.
+  }, [])
 
   // ─── EDITAR PRODUCTO ─────────────────────────────
   const updateProduct = useCallback(async ({ id, name, price, imageDataUrl }) => {
@@ -88,11 +123,8 @@ export function useProducts() {
 
     if (error) {
       console.error('Error actualizando:', error)
-      return
     }
-
-    fetchProducts()
-  }, [fetchProducts])
+  }, [])
 
   // ─── ELIMINAR ─────────────────────────────
   const deleteProduct = useCallback(async (id) => {
@@ -103,11 +135,8 @@ export function useProducts() {
 
     if (error) {
       console.error('Error eliminando:', error)
-      return
     }
-
-    fetchProducts()
-  }, [fetchProducts])
+  }, [])
 
   return {
     products,
