@@ -1,158 +1,277 @@
-import { useState, useEffect, useCallback } from 'react'
+/**
+ * useProducts.js — REESCRITO
+ *
+ * ✅ Todo persiste en Supabase (sin localStorage)
+ * ✅ Sincronización entre dispositivos en tiempo real (Supabase Realtime)
+ * ✅ Imágenes subidas a Cloudinary como File/Blob (funciona en mobile)
+ * ✅ Códigos PRD-XXXX incrementales persistentes (basados en COUNT de Supabase)
+ * ✅ Nombres de columnas correctos: code, name, price, price_card, image_url, created_at
+ *
+ * ─── Tabla requerida en Supabase ──────────────────────────────────────────────
+ * CREATE TABLE products (
+ *   id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+ *   code       TEXT NOT NULL UNIQUE,
+ *   name       TEXT NOT NULL,
+ *   price      NUMERIC(10,2) NOT NULL DEFAULT 0,
+ *   price_card NUMERIC(10,2) NOT NULL DEFAULT 0,
+ *   image_url  TEXT,
+ *   created_at TIMESTAMPTZ DEFAULT NOW()
+ * );
+ *
+ * -- RLS: habilitar y agregar policy para permitir todas las operaciones
+ * ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ * CREATE POLICY "Allow all" ON products FOR ALL USING (true) WITH CHECK (true);
+ * ──────────────────────────────────────────────────────────────────────────────
+ */
 
-const STORAGE_KEY = 'catalogo_productos'
-const COUNTER_KEY = 'catalogo_counter'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { supabase } from '../lib/supabase'
+import { uploadToCloudinary } from '../lib/cloudinary'
 
-// ─── Cloudinary config ────────────────────────────────────────────────────────
-// ⚠️  Reemplazá estos valores con los de tu cuenta Cloudinary gratuita:
-//    https://cloudinary.com/  →  Dashboard → Cloud name + unsigned upload preset
-const CLOUDINARY_CLOUD_NAME = 'dmuwjxtys'          // ← tu cloud name
-const CLOUDINARY_UPLOAD_PRESET = 'Catalogo_ropa' // ← nombre del preset (unsigned)
+const TABLE = 'products'
 
-async function uploadToCloudinary(base64DataUrl) {
-  const formData = new FormData()
-  // Convertir base64 a blob
-  const res = await fetch(base64DataUrl)
-  const blob = await res.blob()
-  formData.append('file', blob)
-  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
+// Genera el próximo código PRD-XXXX basado en cuántos productos existen
+async function getNextCode() {
+  const { count, error } = await supabase
+    .from(TABLE)
+    .select('*', { count: 'exact', head: true })
 
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
-    { method: 'POST', body: formData }
-  )
-
-  if (!response.ok) throw new Error(`Cloudinary error: ${response.status}`)
-  const data = await response.json()
-  return data.secure_url
+  if (error) throw error
+  const next = (count ?? 0) + 1
+  return `PRD-${String(next).padStart(4, '0')}`
 }
 
-function generateCode(counter) {
-  return `PRD-${String(counter).padStart(4, '0')}`
+// Mapea una fila de Supabase al formato interno del componente
+function mapRow(row) {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    price: Number(row.price),
+    priceCard: Number(row.price_card),
+    imageUrl: row.image_url || null,
+    createdAt: row.created_at,
+    // Flags UI (nunca persisten en DB)
+    uploading: false,
+    uploadError: false,
+    imageLocal: null,
+  }
 }
 
 export function useProducts() {
-  const [products, setProducts] = useState(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      return stored ? JSON.parse(stored) : []
-    } catch { return [] }
-  })
+  const [products, setProducts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  const [counter, setCounter] = useState(() => {
-    try {
-      const stored = localStorage.getItem(COUNTER_KEY)
-      return stored ? parseInt(stored, 10) : 1
-    } catch { return 1 }
-  })
-
-  // Persistir en localStorage
+  // ─── Carga inicial ──────────────────────────────────────────────────────────
   useEffect(() => {
-    try {
-      // Guardamos sin imageLocal para ahorrar espacio (puede ser grande en base64)
-      const toStore = products.map(p => ({ ...p, imageLocal: null }))
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore))
-    } catch (e) {
-      // Si excede la cuota, intentamos guardar sin imágenes locales
-      console.warn('localStorage quota exceeded, saving without local images')
+    let isMounted = true
+
+    async function fetchProducts() {
+      try {
+        setLoading(true)
+        setError(null)
+
+        const { data, error: fetchError } = await supabase
+          .from(TABLE)
+          .select('*')
+          .order('created_at', { ascending: false })
+
+        if (fetchError) throw fetchError
+        if (isMounted) {
+          setProducts((data || []).map(mapRow))
+        }
+      } catch (err) {
+        console.error('Error cargando productos:', err)
+        if (isMounted) setError(err.message)
+      } finally {
+        if (isMounted) setLoading(false)
+      }
     }
-  }, [products])
 
+    fetchProducts()
+    return () => { isMounted = false }
+  }, [])
+
+  // ─── Realtime — sincronización entre dispositivos ───────────────────────────
   useEffect(() => {
-    localStorage.setItem(COUNTER_KEY, String(counter))
-  }, [counter])
+    const channel = supabase
+      .channel('products-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: TABLE },
+        (payload) => {
+          const { eventType, new: newRow, old: oldRow } = payload
 
-  const addProduct = useCallback(async ({ name, price, imageDataUrl }) => {
-    const code = generateCode(counter)
+          if (eventType === 'INSERT') {
+            setProducts(prev => {
+              // Evitar duplicados (por si el insert ya lo agregamos optimísticamente)
+              if (prev.find(p => p.id === newRow.id)) return prev
+              return [mapRow(newRow), ...prev]
+            })
+          } else if (eventType === 'UPDATE') {
+            setProducts(prev =>
+              prev.map(p => p.id === newRow.id ? { ...mapRow(newRow), uploading: p.uploading, uploadError: p.uploadError } : p)
+            )
+          } else if (eventType === 'DELETE') {
+            setProducts(prev => prev.filter(p => p.id !== oldRow.id))
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  // ─── Crear producto ─────────────────────────────────────────────────────────
+  const addProduct = useCallback(async ({ name, price, imageFile, imageDataUrl }) => {
     const priceNum = parseFloat(price) || 0
 
-    const newProduct = {
-      id: Date.now().toString(),
+    // Código único basado en DB
+    const code = await getNextCode()
+
+    // Placeholder optimístico
+    const tempId = `temp-${Date.now()}`
+    const optimistic = {
+      id: tempId,
       code,
       name,
       price: priceNum,
       priceCard: +(priceNum * 1.2).toFixed(2),
-      imageLocal: imageDataUrl || null,
       imageUrl: null,
-      uploading: !!imageDataUrl,
-      uploadError: false,
+      imageLocal: imageDataUrl || null,
       createdAt: new Date().toISOString(),
+      uploading: !!(imageFile || imageDataUrl),
+      uploadError: false,
     }
+    setProducts(prev => [optimistic, ...prev])
 
-    setProducts(prev => [newProduct, ...prev])
-    setCounter(c => c + 1)
-
-    // Subida en background
-    if (imageDataUrl) {
-      try {
-        const url = await uploadToCloudinary(imageDataUrl)
-        setProducts(prev =>
-          prev.map(p =>
-            p.id === newProduct.id
-              ? { ...p, imageUrl: url, imageLocal: null, uploading: false, uploadError: false }
-              : p
+    try {
+      // 1. Subir imagen a Cloudinary si existe
+      let imageUrl = null
+      if (imageFile || imageDataUrl) {
+        try {
+          imageUrl = await uploadToCloudinary(imageFile || imageDataUrl)
+        } catch (uploadErr) {
+          console.error('Error subiendo imagen:', uploadErr)
+          setProducts(prev =>
+            prev.map(p => p.id === tempId ? { ...p, uploading: false, uploadError: true } : p)
           )
-        )
-      } catch (err) {
-        console.error('Upload failed:', err)
-        setProducts(prev =>
-          prev.map(p =>
-            p.id === newProduct.id
-              ? { ...p, uploading: false, uploadError: true }
-              : p
-          )
-        )
+          // Continuamos sin imagen
+        }
       }
+
+      // 2. Insertar en Supabase
+      const { data, error: insertError } = await supabase
+        .from(TABLE)
+        .insert({
+          code,
+          name,
+          price: priceNum,
+          price_card: +(priceNum * 1.2).toFixed(2),
+          image_url: imageUrl,
+        })
+        .select()
+        .single()
+
+      if (insertError) throw insertError
+
+      // 3. Reemplazar placeholder con dato real
+      setProducts(prev =>
+        prev.map(p => p.id === tempId ? mapRow(data) : p)
+      )
+
+      return mapRow(data)
+    } catch (err) {
+      console.error('Error creando producto:', err)
+      // Eliminar placeholder en caso de error total
+      setProducts(prev => prev.filter(p => p.id !== tempId))
+      throw err
     }
+  }, [])
 
-    return newProduct
-  }, [counter])
-
-  const updateProduct = useCallback(async ({ id, name, price, imageDataUrl }) => {
+  // ─── Actualizar producto ────────────────────────────────────────────────────
+  const updateProduct = useCallback(async ({ id, name, price, imageFile, imageDataUrl }) => {
     const priceNum = parseFloat(price) || 0
 
+    // Actualización optimística en UI
     setProducts(prev =>
       prev.map(p => {
         if (p.id !== id) return p
-        const updated = {
+        return {
           ...p,
           name,
           price: priceNum,
           priceCard: +(priceNum * 1.2).toFixed(2),
-          uploading: !!imageDataUrl,
+          uploading: !!(imageFile || imageDataUrl),
           uploadError: false,
+          imageLocal: imageDataUrl || p.imageLocal,
         }
-        if (imageDataUrl) {
-          updated.imageLocal = imageDataUrl
-          updated.imageUrl = null
-        }
-        return updated
       })
     )
 
-    if (imageDataUrl) {
-      try {
-        const url = await uploadToCloudinary(imageDataUrl)
-        setProducts(prev =>
-          prev.map(p =>
-            p.id === id
-              ? { ...p, imageUrl: url, imageLocal: null, uploading: false, uploadError: false }
-              : p
+    try {
+      let imageUrl = undefined // undefined = no cambiar en DB
+
+      if (imageFile || imageDataUrl) {
+        try {
+          imageUrl = await uploadToCloudinary(imageFile || imageDataUrl)
+        } catch (uploadErr) {
+          console.error('Error subiendo imagen:', uploadErr)
+          setProducts(prev =>
+            prev.map(p => p.id === id ? { ...p, uploading: false, uploadError: true } : p)
           )
-        )
-      } catch (err) {
-        console.error('Upload failed:', err)
-        setProducts(prev =>
-          prev.map(p =>
-            p.id === id
-              ? { ...p, uploading: false, uploadError: true }
-              : p
-          )
-        )
+        }
       }
+
+      const updatePayload = {
+        name,
+        price: priceNum,
+        price_card: +(priceNum * 1.2).toFixed(2),
+      }
+      if (imageUrl !== undefined) {
+        updatePayload.image_url = imageUrl
+      }
+
+      const { data, error: updateError } = await supabase
+        .from(TABLE)
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single()
+
+      if (updateError) throw updateError
+
+      setProducts(prev =>
+        prev.map(p => p.id === id ? mapRow(data) : p)
+      )
+    } catch (err) {
+      console.error('Error actualizando producto:', err)
+      throw err
     }
   }, [])
 
+  // ─── Eliminar producto ──────────────────────────────────────────────────────
+  const deleteProduct = useCallback(async (id) => {
+    // Eliminar optimísticamente de UI
+    setProducts(prev => prev.filter(p => p.id !== id))
+
+    const { error: deleteError } = await supabase
+      .from(TABLE)
+      .delete()
+      .eq('id', id)
+
+    if (deleteError) {
+      console.error('Error eliminando producto:', deleteError)
+      // Recargar para recuperar estado
+      const { data } = await supabase.from(TABLE).select('*').order('created_at', { ascending: false })
+      if (data) setProducts(data.map(mapRow))
+    }
+  }, [])
+
+  // ─── Reintentar subida de imagen ────────────────────────────────────────────
   const retryUpload = useCallback(async (id) => {
     const product = products.find(p => p.id === id)
     if (!product?.imageLocal) return
@@ -163,25 +282,34 @@ export function useProducts() {
 
     try {
       const url = await uploadToCloudinary(product.imageLocal)
+
+      const { data, error: updateError } = await supabase
+        .from(TABLE)
+        .update({ image_url: url })
+        .eq('id', id)
+        .select()
+        .single()
+
+      if (updateError) throw updateError
+
       setProducts(prev =>
-        prev.map(p =>
-          p.id === id
-            ? { ...p, imageUrl: url, imageLocal: null, uploading: false, uploadError: false }
-            : p
-        )
+        prev.map(p => p.id === id ? mapRow(data) : p)
       )
     } catch (err) {
+      console.error('Retry upload failed:', err)
       setProducts(prev =>
-        prev.map(p =>
-          p.id === id ? { ...p, uploading: false, uploadError: true } : p
-        )
+        prev.map(p => p.id === id ? { ...p, uploading: false, uploadError: true } : p)
       )
     }
   }, [products])
 
-  const deleteProduct = useCallback((id) => {
-    setProducts(prev => prev.filter(p => p.id !== id))
-  }, [])
-
-  return { products, addProduct, updateProduct, deleteProduct, retryUpload }
+  return {
+    products,
+    loading,
+    error,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    retryUpload,
+  }
 }
